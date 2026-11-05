@@ -3,6 +3,19 @@ import { randomUUID } from 'node:crypto';
 import mongoose, { type Connection } from 'mongoose';
 
 type PersonResult = { _id: string; name: string; createdAt: string };
+type VisitResult = {
+  _id: string;
+  personId: string;
+  address: string;
+  visitedAt: string;
+  method: string;
+};
+type HistoryResult = {
+  items: VisitResult[];
+  total: number;
+  page: number;
+  limit: number;
+};
 type SiteResult = {
   _id: string;
   address: string;
@@ -198,5 +211,94 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
       ).status,
     ).toBe(404);
     expect((await api('/sites/missing.zz')).status).toBe(404);
+  });
+
+  it('records broken-link attempts as separate immutable navigation events', async () => {
+    const person = await createPerson();
+    const payload = {
+      personId: person._id,
+      address: ' Missing.ZZ ',
+      method: 'link',
+    };
+    const first = await api<VisitResult>('/visits', payload);
+    const second = await api<VisitResult>('/visits', payload);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(first.body).toMatchObject({
+      personId: person._id,
+      address: 'missing.zz',
+      method: 'link',
+    });
+    expect(first.body._id).not.toBe(second.body._id);
+    expect(Number.isNaN(Date.parse(first.body.visitedAt))).toBe(false);
+    expect((await api('/sites/missing.zz')).status).toBe(404);
+    const history = await api<HistoryResult>(
+      '/people/' + person._id + '/visits',
+    );
+    expect(history.status).toBe(200);
+    expect(history.body.total).toBe(2);
+    expect(history.body.items.map((visit) => visit._id)).toEqual([
+      second.body._id,
+      first.body._id,
+    ]);
+    const update = await fetch(apiUrl + '/visits/' + first.body._id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: 'changed.zz' }),
+    });
+    expect(update.status).toBe(404);
+    expect(
+      (
+        await connection
+          .collection('visits')
+          .findOne({ _id: new mongoose.Types.ObjectId(first.body._id) })
+      )?.address,
+    ).toBe('missing.zz');
+  });
+
+  it('paginates newest-first history with an ObjectId tie-breaker and person isolation', async () => {
+    const person = await createPerson();
+    const other = await createPerson('Other');
+    const ids: string[] = [];
+    for (const address of ['first.zz', 'second.zz', 'third.zz']) {
+      const visit = await api<VisitResult>('/visits', {
+        personId: person._id,
+        address,
+        method: 'typed',
+      });
+      expect(visit.status).toBe(201);
+      ids.push(visit.body._id);
+    }
+    await api('/visits', {
+      personId: other._id,
+      address: 'private.zz',
+      method: 'typed',
+    });
+    // Raw-driver fixture forces timestamp ties; production exposes no history mutation.
+    await connection
+      .collection('visits')
+      .updateMany(
+        {},
+        { $set: { visitedAt: new Date('2026-01-01T00:00:00Z') } },
+      );
+    const expected = ids.sort().reverse();
+    const firstPage = (
+      await api<HistoryResult>('/people/' + person._id + '/visits?limit=2')
+    ).body;
+    const secondPage = (
+      await api<HistoryResult>(
+        '/people/' + person._id + '/visits?page=2&limit=2',
+      )
+    ).body;
+    expect(firstPage).toMatchObject({ page: 1, limit: 2, total: 3 });
+    expect(firstPage.items.map((v) => v._id)).toEqual(expected.slice(0, 2));
+    expect(secondPage.items.map((v) => v._id)).toEqual(expected.slice(2));
+    expect(
+      (
+        await api<HistoryResult>(
+          '/people/' + person._id + '/visits?page=3&limit=2',
+        )
+      ).body.items,
+    ).toEqual([]);
   });
 });
