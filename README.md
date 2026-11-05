@@ -134,17 +134,40 @@ The named `mongodb_data` volume persists database data across recreation.
 reset. Environment or Dockerfile changes require `docker compose up -d --build`;
 `restart` does not apply new container configuration.
 
+## Docker troubleshooting
+
+If a service exits during startup, inspect `docker compose ps -a` and
+`docker compose logs --tail=200 backend` before restarting it.
+
+The backend mounts `/app/dist` as an isolated build-output volume. Keep Nest's
+`compilerOptions.deleteOutDir` disabled: deleting the volume's mount point
+causes `EBUSY: resource busy or locked, rmdir '/app/dist'` before compilation.
+The TypeScript incremental cache is also stored inside `dist`, so a host cache
+cannot cause JavaScript emission to be skipped in a separate container volume.
+After updating the configuration, run `docker compose up --build -d` again.
+There is no need to remove containers' volumes or reset MongoDB data.
+
+Host filesystem events may not reach Docker Desktop bind mounts. The backend
+uses TypeScript's `PriorityPollingInterval` watcher, and Next.js polls source
+changes every second so edits on Windows trigger development reloads.
+The backend's watch command uses `--no-shell` so Nest stops the Node process
+directly on reload; a leftover process would otherwise keep port 4000 occupied
+in the slim image, which does not include `ps` for process-tree discovery.
+
 ## Checks
 
 ```bash
 docker compose config --quiet
 docker compose run --rm --no-deps frontend npm run lint
-docker compose run --rm --no-deps frontend npm run build
+docker compose run --rm --no-deps -e NODE_ENV=production frontend npm run build
 docker compose run --rm --no-deps backend npm run lint
 docker compose run --rm --no-deps backend npm test
 docker compose run --rm --no-deps backend npm run test:e2e
 docker compose run --rm --no-deps backend npm run build
 ```
+
+The frontend build command overrides the development service's `NODE_ENV` so
+Next.js and React both use production mode during prerendering.
 
 Backend tests cover configuration validation, database readiness and failure,
 API routing, and CORS. HTTP tests substitute the database connection. Running
