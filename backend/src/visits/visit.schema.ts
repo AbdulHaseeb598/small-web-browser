@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import { Person } from '../people/person.schema.js';
 import {
   ADDRESS_MAX_LENGTH,
@@ -16,7 +16,7 @@ export class Visit {
   _id!: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: Person.name,
     required: true,
     immutable: true,

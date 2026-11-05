@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import {
   ADDRESS_MAX_LENGTH,
   FICTIONAL_ADDRESS,
@@ -27,7 +27,11 @@ export class Site {
   @Prop({ type: String, required: true, maxlength: 100000 })
   html!: string;
 
-  @Prop({ type: Types.ObjectId, ref: Person.name, required: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: Person.name,
+    required: true,
+  })
   authorId!: Types.ObjectId;
 
   createdAt!: Date;
