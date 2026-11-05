@@ -12,7 +12,7 @@ type VisitResult = {
   method: string;
 };
 type HistoryResult = {
-  items: VisitResult[];
+  items: (VisitResult & { exists: boolean })[];
   total: number;
   page: number;
   limit: number;
@@ -490,6 +490,148 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     expect(
       await connection.collection('visits').findOne({ _id: legacy._id }),
     ).toEqual(legacy);
+  });
+
+  it('searches visible HTML body text and phrases without matching hidden markup', async () => {
+    const person = await createPerson();
+    await api('/sites', {
+      address: 'workshop.zz',
+      title: 'Workshop notebook',
+      authorId: person._id,
+      html: '<head><title>headneedle</title></head><body><p>Photodiodes measure light pollution &amp; coastal brightness.</p><script>scriptneedle</script><style>styl eneedle</style><p hidden>hiddenneedle</p><div data-topic="attrneedle">Calibrate carefully.</div></body>',
+    });
+    type Results = {
+      items: {
+        address: string;
+        title: string;
+        excerpt: string;
+        score: number;
+      }[];
+      total: number;
+      query: string;
+      limit: number;
+    };
+    const body = await api<Results>('/search?q=photodiodes');
+    expect(body.status).toBe(200);
+    expect(body.body.items[0].address).toBe('workshop.zz');
+    expect(body.body.items[0].excerpt).toContain('Photodiodes');
+    expect(body.body.items[0]).not.toHaveProperty('html');
+    expect(
+      (
+        await api<Results>(
+          '/search?q=' + encodeURIComponent('"light pollution"'),
+        )
+      ).body.total,
+    ).toBe(1);
+    expect(
+      (await api<Results>('/search?q=coastal%20calibrate')).body.total,
+    ).toBe(1);
+    for (const query of [
+      'scriptneedle',
+      'hiddenneedle',
+      'attrneedle',
+      'headneedle',
+      'notfoundanywhere',
+    ])
+      expect((await api<Results>('/search?q=' + query)).body.items).toEqual([]);
+    await connection
+      .collection('sites')
+      .updateOne(
+        { address: 'workshop.zz' },
+        { $set: { html: '<p>Replacement content</p>' } },
+      );
+    expect((await api<Results>('/search?q=photodiodes')).body.items).toEqual(
+      [],
+    );
+    expect((await api<Results>('/search?q=replacement')).body.total).toBe(1);
+  });
+
+  it('ranks title and address above body-only matches and bounds deterministic results', async () => {
+    const person = await createPerson();
+    for (const [address, title, html] of [
+      ['body.zz', 'Field notes', '<p>Aurora over the ridge</p>'],
+      ['title.zz', 'Aurora notes', '<p>Ordinary notes</p>'],
+      ['aurora.zz', 'Ridge notes', '<p>Ordinary notes</p>'],
+      ['exact.zz', 'Aurora', '<p>Ordinary notes</p>'],
+    ]) {
+      expect(
+        (await api('/sites', { address, title, html, authorId: person._id }))
+          .status,
+      ).toBe(201);
+    }
+    type Results = {
+      items: { address: string; excerpt: string }[];
+      total: number;
+      limit: number;
+    };
+    expect(
+      (await api<Results>('/search?q=aurora')).body.items.map(
+        (item) => item.address,
+      ),
+    ).toEqual(['exact.zz', 'title.zz', 'aurora.zz', 'body.zz']);
+    for (let index = 0; index < 22; index++)
+      await api('/sites', {
+        address: 'match' + String(index).padStart(2, '0') + '.zz',
+        title: 'Equal match',
+        html: '<p>A distant galaxy</p>',
+        authorId: person._id,
+      });
+    const first = (await api<Results>('/search?q=galaxy')).body;
+    expect(first).toMatchObject({ total: 22, limit: 20 });
+    expect(first.items).toHaveLength(20);
+    expect(first.items[0].address).toBe('match00.zz');
+    expect(first.items[19].address).toBe('match19.zz');
+    expect((await api<Results>('/search?q=galaxy')).body).toEqual(first);
+  });
+
+  it('validates search input and reports consistent bad requests', async () => {
+    for (const path of [
+      '/search',
+      '/search?q=',
+      '/search?q=%20%20',
+      '/search?q=' + 'x'.repeat(101),
+      '/search?q=a&q=b',
+      '/search?q=valid&limit=5',
+      '/search?q=' + encodeURIComponent('"unclosed'),
+      '/search?q=' + encodeURIComponent('""'),
+      '/search?q=' + encodeURIComponent('a b c d e f g h i j k'),
+    ]) {
+      const result = await api(path);
+      expect(result.status, path).toBe(400);
+      expect(result.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+      });
+    }
+  });
+
+  it('computes history page-existence labels without requiring sites for visits', async () => {
+    const person = await createPerson();
+    await api('/visits', {
+      personId: person._id,
+      address: 'published.zz',
+      method: 'typed',
+    });
+    await api('/visits', {
+      personId: person._id,
+      address: 'missing.zz',
+      method: 'link',
+    });
+    await api('/sites', {
+      address: 'published.zz',
+      title: 'Published later',
+      html: '<p>Now available</p>',
+      authorId: person._id,
+    });
+    const history = (
+      await api<HistoryResult>('/people/' + person._id + '/visits')
+    ).body;
+    expect(
+      history.items.find((item) => item.address === 'published.zz')?.exists,
+    ).toBe(true);
+    expect(
+      history.items.find((item) => item.address === 'missing.zz')?.exists,
+    ).toBe(false);
   });
 
   it('paginates newest-first history with an ObjectId tie-breaker and person isolation', async () => {
