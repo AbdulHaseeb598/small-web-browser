@@ -1,9 +1,10 @@
 # Small Web Browser
 
-A technical assessment project for a simulated web browser. Steps 1 and 2
+A technical assessment project for a simulated web browser. Steps 1 through 3
 provide development infrastructure and backend persistence for people, published
-sites, and navigation events. The browser interface, navigation engine, search,
-and safe HTML rendering are not implemented yet.
+sites, and navigation events, plus deterministic demonstration data. The browser
+interface, navigation engine, search, and safe HTML rendering are not implemented
+yet.
 
 ## Stack and structure
 
@@ -28,6 +29,7 @@ small-web-browser/
 │   ├── src/people/       # Person schema, DTO, service, and controller
 │   ├── src/sites/        # Site publishing and retrieval
 │   ├── src/visits/       # Append-only navigation history
+│   ├── src/seed/         # Deterministic content and insert-only seed command
 │   ├── test/
 │   ├── Dockerfile
 │   ├── .dockerignore
@@ -193,6 +195,86 @@ The URI must point to a host-accessible MongoDB instance; Docker DNS is only
 resolvable inside Compose. Set frontend API URLs in `frontend/.env.local` and
 run `npm run dev`.
 
+## Deterministic seed data
+
+With MongoDB and the backend running, execute:
+
+```bash
+docker compose exec backend npm run seed
+```
+
+The command builds TypeScript, loads the same validated environment and Mongoose
+models as the backend, and connects without starting another HTTP server. It
+prints inserted, updated, and existing counts per collection, closes its
+connection, and exits. Failures return a nonzero exit code. No extra dependencies
+or infrastructure services are needed.
+
+The dataset contains **5 people, 10 sites, and 60 visits**. Each author owns two
+sites with distinct, original multi-paragraph HTML about coastal ecology, local
+history, maps, gardening, astronomy, electronics, and cooking. Documents contain
+only self-contained markup and fictional `.zz` hyperlinks; there are no external
+images, scripts, stylesheets, or other network resources.
+
+Examples include `tidepool.zz`, `kelp-lab.zz`, `night-garden.zz`, `map-room.zz`,
+`observatory.zz`, and `bread-journal.zz`. Connected paths span at least four pages.
+Links to `moon-pier.zz`, `glasshouse.zz`, `comet-ledger.zz`, and `weather-buoy.zz`
+intentionally have no Site document, and their attempted visits remain in history.
+
+Browsing events span **2026-01-15 09:00–10:00 UTC**, independent of the current
+clock. They include every navigation method, repeated visits, and different
+personal trails. Mira Solis has 20 events covering 9 of the 10 existing sites.
+People/site timestamps are fixed at `2026-01-01T00:00:00.000Z`.
+
+### Repeated execution and conflicts
+
+Fixed ObjectIds are defined in `backend/src/seed/seed-data.ts` using the
+`5eed2026` namespace. IDs, ownership, content, and timestamps do not change on
+reruns. Writes use only `$setOnInsert`: an unchanged second execution reports
+0 inserted, 0 updated, and 5/10/60 existing people/sites/visits. `updated` is
+always zero because existing records are never rewritten.
+
+The command validates the complete dataset against the existing schemas and
+preflights reserved IDs and addresses before inserting. Exact existing records
+are accepted. A different record at a reserved ID, an occupied seed site address,
+or an edit to previously seeded content causes an explicit conflict and exit 1.
+Resolve that conflict manually; the seed command does not replace someone's data.
+Person names are not unique identities: a user-created person with the same name
+and a different ID is preserved.
+
+Author/person references now use actual Mongoose ObjectId schema types. History
+reads also accept legacy string references from earlier API writes without
+rewriting those documents, so both forms remain accessible.
+
+Parents are inserted before sites and visits. Unique indexes and post-write
+verification make concurrent seed runs safe. Writes are atomic per document,
+not a cross-collection transaction: interruptions or racing conflicts can leave
+partial inserts. Retrying fills missing records without duplicating or changing
+completed ones. No collections, unrelated documents, or Docker volumes are deleted.
+
+### Verify content and run seed tests
+
+```bash
+curl http://localhost:4000/api/people
+curl http://localhost:4000/api/sites
+curl http://localhost:4000/api/sites/tidepool.zz
+curl 'http://localhost:4000/api/people/5eed20260100000000000001/visits?limit=100'
+docker compose exec backend npm test -- seed-data
+docker compose exec backend npm run test:integration
+```
+
+For just the seed integration suite, build first and filter Vitest explicitly:
+
+```bash
+docker compose exec backend npm run build
+docker compose exec backend npx vitest run --config vitest.config.integration.ts seed
+```
+
+The full `npm run test:integration` suite also includes seed tests. Each seed
+integration run uses its own random `small_web_browser_seed_test_<uuid>` database
+and removes only that database afterward. Coverage includes repeated and concurrent
+CLI runs, unrelated-data preservation, reserved-identity conflicts, edited content,
+and recovery from partial people, sites, and visits phases.
+
 ## Domain models
 
 | Collection | Fields | Additional indexes |
@@ -292,7 +374,7 @@ reconstruct one automatically.
 
 ## Current status
 
-The backend models, publishing/retrieval APIs, and persistent visit history are
-implemented. The existing frontend remains an initialization page. There is no
-browser UI, navigation engine, full-text search, seed data, HTML rendering,
-authentication, bookmarks, or tabs.
+The backend models, publishing/retrieval APIs, persistent visit history, and
+deterministic seed command are implemented. The existing frontend remains an
+initialization page. There is no browser UI, navigation engine, full-text search,
+HTML rendering, authentication, bookmarks, or tabs.

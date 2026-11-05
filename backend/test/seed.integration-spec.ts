@@ -7,6 +7,7 @@ import { Site, SiteSchema } from '../src/sites/site.schema.js';
 import { Visit, VisitSchema } from '../src/visits/visit.schema.js';
 import { SEED_PEOPLE, SEED_SITES, SEED_VISITS } from '../src/seed/seed-data.js';
 import {
+  SeedConflictError,
   seedDatabase,
   type SeedModels,
   type SeedSummary,
@@ -149,6 +150,141 @@ describe('Seed persistence with real MongoDB', () => {
     );
     expect(after).toBe(before);
     expect(await counts()).toEqual([6, 11, 61]);
+  });
+
+  it('exposes all seeded sites and complete histories through the native HTTP API', async () => {
+    await seedDatabase(models);
+    const result = await execute(
+      process.execPath,
+      ['test/seed-api-check.mjs'],
+      { env: { ...process.env, MONGODB_URI: uri }, timeout: 15000 },
+    );
+    expect(result.stdout).toContain(
+      'Verified all seeded sites and histories through HTTP',
+    );
+  });
+
+  it('supports concurrent native CLI execution without duplicate records', async () => {
+    const summaries = await Promise.all([command(), command()]);
+    expect(await counts()).toEqual([5, 10, 60]);
+    for (const [index, name] of names.entries()) {
+      expect(
+        summaries.reduce((count, result) => count + result[name].inserted, 0),
+      ).toBe([5, 10, 60][index]);
+      expect(
+        summaries.reduce((count, result) => count + result[name].existing, 0),
+      ).toBe([5, 10, 60][index]);
+      expect(summaries.every((result) => result[name].updated === 0)).toBe(
+        true,
+      );
+    }
+    const concurrent = await snapshot();
+    await seedDatabase(models);
+    expect(await snapshot()).toBe(concurrent);
+  });
+
+  it('rejects a conflicting person identity before inserting any seed records', async () => {
+    await models.people.create({
+      _id: new mongoose.Types.ObjectId(SEED_PEOPLE[0]._id),
+      name: 'An unrelated owner',
+    });
+    const before = await snapshot();
+    await expect(seedDatabase(models)).rejects.toBeInstanceOf(
+      SeedConflictError,
+    );
+    expect(await snapshot()).toBe(before);
+    expect(await counts()).toEqual([1, 0, 0]);
+  });
+
+  it.each(['address', 'identity'] as const)(
+    'rejects a conflicting site %s and makes the CLI fail without modifying user data',
+    async (conflict) => {
+      const owner = await models.people.create({ name: 'An unrelated owner' });
+      await models.sites.create({
+        _id:
+          conflict === 'identity'
+            ? new mongoose.Types.ObjectId(SEED_SITES[0]._id)
+            : new mongoose.Types.ObjectId(),
+        address:
+          conflict === 'address' ? SEED_SITES[0].address : 'user-page.zz',
+        authorId: owner._id,
+        title: 'Private notes',
+        html: '<p>Never replace this.</p>',
+      });
+      const before = await snapshot();
+      await expect(command()).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Seed conflict in sites'),
+      });
+      expect(await snapshot()).toBe(before);
+      expect(await counts()).toEqual([1, 1, 0]);
+    },
+  );
+
+  it('rejects a conflicting immutable visit identity without replacing or duplicating anything', async () => {
+    const owner = await models.people.create({ name: 'An unrelated owner' });
+    await models.visits.create({
+      _id: new mongoose.Types.ObjectId(SEED_VISITS[0]._id),
+      personId: owner._id,
+      address: 'user-only.zz',
+      method: 'typed',
+    });
+    const before = await snapshot();
+    await expect(seedDatabase(models)).rejects.toBeInstanceOf(
+      SeedConflictError,
+    );
+    expect(await snapshot()).toBe(before);
+    expect(await counts()).toEqual([1, 0, 1]);
+  });
+
+  it('preserves edits to previously seeded content and reports them as a conflict', async () => {
+    await seedDatabase(models);
+    await models.sites.updateOne(
+      { _id: SEED_SITES[0]._id },
+      { $set: { html: '<p>A person edited this page.</p>' } },
+    );
+    const edited = await snapshot();
+    await expect(command()).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('Seed conflict in sites'),
+    });
+    expect(await snapshot()).toBe(edited);
+  });
+
+  it.each([
+    { phase: 'people', people: 2, sites: 0 },
+    { phase: 'sites', people: 5, sites: 4 },
+  ])('recovers an interrupted $phase phase', async ({ people, sites }) => {
+    await models.people.create(
+      SEED_PEOPLE.slice(0, people).map((person) => ({
+        ...person,
+        _id: new mongoose.Types.ObjectId(person._id),
+        createdAt: new Date(person.createdAt),
+      })),
+    );
+    if (sites > 0)
+      await models.sites.create(
+        SEED_SITES.slice(0, sites).map((site) => ({
+          ...site,
+          _id: new mongoose.Types.ObjectId(site._id),
+          authorId: new mongoose.Types.ObjectId(site.authorId),
+          createdAt: new Date(site.createdAt),
+          updatedAt: new Date(site.updatedAt),
+        })),
+      );
+    const result = await command();
+    expect(result.people).toEqual({
+      inserted: 5 - people,
+      updated: 0,
+      existing: people,
+    });
+    expect(result.sites).toEqual({
+      inserted: 10 - sites,
+      updated: 0,
+      existing: sites,
+    });
+    expect(result.visits).toEqual({ inserted: 60, updated: 0, existing: 0 });
+    expect(await counts()).toEqual([5, 10, 60]);
   });
 
   it('recovers a partially inserted visit phase without changing the completed records', async () => {
