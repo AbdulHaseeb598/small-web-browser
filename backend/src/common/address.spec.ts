@@ -23,6 +23,7 @@ describe('Fictional addresses', () => {
     'a_b.zz',
     'zz',
     'a'.repeat(64) + '.zz',
+    'abc.'.repeat(64) + 'zz',
     123,
     null,
   ])('rejects malformed identifier %s', async (address) => {

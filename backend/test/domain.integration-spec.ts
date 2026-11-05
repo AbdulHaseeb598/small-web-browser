@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import mongoose, { type Connection } from 'mongoose';
+import { Visit, VisitSchema } from '../src/visits/visit.schema.js';
 
 type PersonResult = { _id: string; name: string; createdAt: string };
 type VisitResult = {
@@ -256,6 +257,204 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     ).toBe('missing.zz');
   });
 
+  it.each([
+    {},
+    { name: '' },
+    { name: '   ' },
+    { name: 123 },
+    { name: null },
+    { name: 'Ada', role: 'admin' },
+  ])(
+    'rejects invalid person payload %j with a consistent validation envelope',
+    async (payload) => {
+      const result = await api('/people', payload);
+      expect(result.status).toBe(400);
+      expect(result.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: expect.any(Array),
+      });
+      expect(await connection.collection('people').countDocuments()).toBe(0);
+    },
+  );
+
+  it('rejects missing, mistyped, and unexpected publication fields without persisting a site', async () => {
+    const person = await createPerson();
+    const valid: Record<string, unknown> = {
+      address: 'valid.zz',
+      title: 'Valid',
+      html: '<p>ok</p>',
+      authorId: person._id,
+    };
+    for (const field of ['address', 'title', 'html', 'authorId']) {
+      const invalid = { ...valid };
+      delete invalid[field];
+      expect((await api('/sites', invalid)).status).toBe(400);
+    }
+    for (const invalid of [
+      { ...valid, title: '   ' },
+      { ...valid, html: '' },
+      { ...valid, html: 12 },
+      { ...valid, authorId: 'bad-id' },
+      { ...valid, createdAt: new Date().toISOString() },
+      { ...valid, address: { $ne: null } },
+      { ...valid, title: 'x'.repeat(201) },
+    ])
+      expect((await api('/sites', invalid)).status).toBe(400);
+    expect(await connection.collection('sites').countDocuments()).toBe(0);
+  });
+
+  it('returns consistent 404s for well-formed IDs/addresses that do not exist', async () => {
+    const missing = new mongoose.Types.ObjectId().toHexString();
+    for (const [path, payload] of [
+      ['/sites/missing.zz', undefined],
+      ['/people/' + missing + '/visits', undefined],
+      [
+        '/sites',
+        {
+          address: 'valid.zz',
+          title: 'Valid',
+          html: '<p>x</p>',
+          authorId: missing,
+        },
+      ],
+      ['/visits', { address: 'missing.zz', personId: missing, method: 'link' }],
+    ] as const) {
+      const response = await api(path, payload);
+      expect(response.status).toBe(404);
+      expect(response.body).toMatchObject({
+        statusCode: 404,
+        error: 'Not Found',
+        message: expect.any(String),
+      });
+    }
+    expect((await api('/people/not-an-id/visits')).status).toBe(400);
+    expect((await api('/sites/https%3A%2F%2Fexample.com')).status).toBe(400);
+    expect(await connection.collection('visits').countDocuments()).toBe(0);
+  });
+
+  it('accepts every supported navigation method and keeps events distinct', async () => {
+    const person = await createPerson();
+    const methods = ['typed', 'link', 'back', 'forward', 'history', 'search'];
+    for (const method of methods) {
+      const response = await api<VisitResult>('/visits', {
+        personId: person._id,
+        address: 'attempt.zz',
+        method,
+      });
+      expect(response.status).toBe(201);
+      expect(response.body.method).toBe(method);
+    }
+    const history = (
+      await api<HistoryResult>('/people/' + person._id + '/visits')
+    ).body;
+    expect(history.total).toBe(6);
+    expect(new Set(history.items.map((v) => v._id)).size).toBe(6);
+  });
+
+  it('rejects invalid visit payloads and client-controlled timestamps', async () => {
+    const person = await createPerson();
+    const valid: Record<string, unknown> = {
+      personId: person._id,
+      address: 'valid.zz',
+      method: 'typed',
+    };
+    for (const field of ['personId', 'address', 'method']) {
+      const invalid = { ...valid };
+      delete invalid[field];
+      expect((await api('/visits', invalid)).status).toBe(400);
+    }
+    for (const invalid of [
+      { ...valid, personId: 'bad-id' },
+      { ...valid, method: 'reload' },
+      { ...valid, method: 'LINK' },
+      { ...valid, address: 'https://example.com' },
+      { ...valid, visitedAt: '2020-01-01T00:00:00Z' },
+      { ...valid, _id: new mongoose.Types.ObjectId().toHexString() },
+    ])
+      expect((await api('/visits', invalid)).status).toBe(400);
+    expect(await connection.collection('visits').countDocuments()).toBe(0);
+  });
+
+  it('validates pagination bounds, unknown query fields, and empty history defaults', async () => {
+    const person = await createPerson();
+    const path = '/people/' + person._id + '/visits';
+    expect((await api<HistoryResult>(path)).body).toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+    });
+    for (const query of [
+      'page=0',
+      'page=-1',
+      'page=1.5',
+      'page=abc',
+      'page=1000001',
+      'limit=0',
+      'limit=101',
+      'limit=2.5',
+      'limit=abc',
+      'limit=',
+      'page=1&page=2',
+      'sort=oldest',
+    ]) {
+      const response = await api(path + '?' + query);
+      expect(response.status, query).toBe(400);
+      expect(response.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: expect.any(Array),
+      });
+    }
+  });
+
+  it('keeps all visit fields immutable through the actual Mongoose schema', async () => {
+    const person = await createPerson();
+    const other = await createPerson('Other');
+    const original = (
+      await api<VisitResult>('/visits', {
+        personId: person._id,
+        address: 'original.zz',
+        method: 'typed',
+      })
+    ).body;
+    const model = connection.model(Visit.name, VisitSchema);
+    await model.updateOne(
+      { _id: original._id },
+      {
+        $set: {
+          address: 'changed.zz',
+          personId: other._id,
+          method: 'search',
+          visitedAt: new Date(0),
+        },
+      },
+    );
+    const persisted = await connection
+      .collection('visits')
+      .findOne({ _id: new mongoose.Types.ObjectId(original._id) });
+    expect(persisted?.address).toBe('original.zz');
+    expect(persisted?.personId.toString()).toBe(person._id);
+    expect(persisted?.method).toBe('typed');
+    expect(persisted?.visitedAt.toISOString()).toBe(original.visitedAt);
+  });
+
+  it('creates the real MongoDB indexes and retains database-backed health', async () => {
+    const siteIndexes = await connection.collection('sites').indexes();
+    expect(siteIndexes).toContainEqual(
+      expect.objectContaining({ key: { address: 1 }, unique: true }),
+    );
+    const visitIndexes = await connection.collection('visits').indexes();
+    expect(visitIndexes).toContainEqual(
+      expect.objectContaining({ key: { personId: 1, visitedAt: -1, _id: -1 } }),
+    );
+    expect((await api('/health')).body).toMatchObject({
+      status: 'ok',
+      database: 'up',
+    });
+  });
+
   it('paginates newest-first history with an ObjectId tie-breaker and person isolation', async () => {
     const person = await createPerson();
     const other = await createPerson('Other');
@@ -300,5 +499,17 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
         )
       ).body.items,
     ).toEqual([]);
+    // Timestamp order takes precedence over the ObjectId tie-breaker.
+    const oldestId = expected[expected.length - 1];
+    await connection
+      .collection('visits')
+      .updateOne(
+        { _id: new mongoose.Types.ObjectId(oldestId) },
+        { $set: { visitedAt: new Date('2030-01-01T00:00:00Z') } },
+      );
+    const newest = (
+      await api<HistoryResult>('/people/' + person._id + '/visits?limit=1')
+    ).body;
+    expect(newest.items[0]._id).toBe(oldestId);
   });
 });
