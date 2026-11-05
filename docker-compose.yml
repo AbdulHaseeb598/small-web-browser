@@ -33,7 +33,7 @@ services:
       PORT: "4000"
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/small_web_browser}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      TSC_WATCHFILE: FixedPollingInterval
+      TSC_WATCHFILE: PriorityPollingInterval
     volumes:
       - ./backend:/app
       - /app/node_modules
