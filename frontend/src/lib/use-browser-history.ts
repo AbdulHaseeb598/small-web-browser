@@ -9,6 +9,8 @@ function marker(value: unknown): value is Marker {
 
 export function useBrowserHistory(engine: NavigationEngine) {
   useEffect(() => {
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
     const owner = crypto.randomUUID();
     let position = 0;
     let initialized = false;
@@ -39,6 +41,6 @@ export function useBrowserHistory(engine: NavigationEngine) {
       finally { applyingPop = false; }
     };
     window.addEventListener('popstate', pop);
-    return () => { unsubscribe(); window.removeEventListener('popstate', pop); };
+    return () => { unsubscribe(); window.removeEventListener('popstate', pop); window.history.scrollRestoration = previousRestoration; };
   }, [engine]);
 }

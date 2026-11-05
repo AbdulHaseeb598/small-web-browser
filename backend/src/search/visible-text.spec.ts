@@ -1,6 +1,9 @@
 import { visibleText } from './visible-text.js';
 
 describe('HTML text extraction for search', () => {
+  it('preserves words split by inline markup and separates block boundaries', () => {
+    expect(visibleText('<p>photo<b>diodes</b></p><p>sky<br>map</p>')).toBe('photodiodes sky map');
+  });
   it('decodes entities and separates block/inline text without indexing tags or attributes', () => {
     expect(
       visibleText(

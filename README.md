@@ -1,10 +1,9 @@
 # Small Web Browser
 
-A technical assessment project for a simulated web browser. Steps 1 through 3
-provide development infrastructure and backend persistence for people, published
-sites, and navigation events, plus deterministic demonstration data. The browser
-interface, navigation engine, search, and safe HTML rendering are not implemented
-yet.
+A technical assessment project for a simulated web browser. Steps 1 through 5
+provide Docker development infrastructure, persistent people/sites/visits,
+deterministic demonstration data, and a responsive browser with per-person
+navigation, history, full-content search, and contained HTML rendering.
 
 ## Stack and structure
 
@@ -16,8 +15,9 @@ npm lockfile. No root dependency installation is needed.
 ```text
 small-web-browser/
 ├── frontend/
-│   ├── src/app/          # Minimal landing page and layout
-│   ├── src/lib/          # Environment-based API configuration
+│   ├── src/app/          # Browser page, layout, and responsive styling
+│   ├── src/components/   # Toolbar, iframe, results, and history presentation
+│   ├── src/lib/          # Navigation engine, typed API, containment, native history
 │   ├── public/
 │   ├── Dockerfile
 │   ├── .dockerignore
@@ -93,8 +93,7 @@ defaults, which also apply when `.env` is absent.
 When changing host ports, update `FRONTEND_ORIGIN` and `NEXT_PUBLIC_API_URL` to
 match. Container ports remain fixed. Compose sets the frontend server-only
 `API_URL` to `http://backend:4000/api` for internal Docker networking. API URL
-selection lives in `frontend/src/lib/api.ts`. The landing page links to the
-public health endpoint without polling service status. Public variables must
+selection lives in `frontend/src/lib/api.ts`. Public variables must
 never contain secrets.
 
 The backend validates configuration at startup, enables CORS for the configured
@@ -164,6 +163,7 @@ in the slim image, which does not include `ps` for process-tree discovery.
 ```bash
 docker compose config --quiet
 docker compose run --rm --no-deps frontend npm run lint
+docker compose run --rm --no-deps frontend npm test
 docker compose run --rm --no-deps -e NODE_ENV=production frontend npm run build
 docker compose run --rm --no-deps backend npm run lint
 docker compose run --rm --no-deps backend npm test
@@ -297,6 +297,7 @@ a request for a nonexistent address still produces a navigation event.
 | POST | `/api/people` | Created person, HTTP 201 |
 | GET | `/api/sites` | Metadata only, newest first (`createdAt`, then `_id`); excludes HTML |
 | GET | `/api/sites/:address` | Site including authored HTML, returned as JSON |
+| GET | `/api/search?q=photodiode` | `{ query, items, total, limit }`; title/address/excerpt only |
 | POST | `/api/sites` | Published site, HTTP 201 |
 | GET | `/api/people/:personId/visits` | `{ items, total, page, limit }`, newest first |
 | POST | `/api/visits` | Recorded navigation attempt, HTTP 201 |
@@ -317,7 +318,8 @@ health endpoint retains its existing readiness response format.
 Names are limited to 120 characters, titles to 200, and nonempty HTML strings
 to 100,000 characters, subject also to the server's JSON request-size limit.
 HTML is stored without trimming, rewriting, or sanitizing, including leading
-and trailing whitespace. This step does not render it or fetch external pages.
+and trailing whitespace. Rendering applies a separate restrictive boundary;
+the stored original is preserved. External pages are never fetched.
 
 ### Fictional addresses
 
@@ -353,28 +355,93 @@ curl 'http://localhost:4000/api/people/PERSON_ID/visits?page=1&limit=20'
 Visit methods are `typed`, `link`, `back`, `forward`, `history`, and `search`.
 Timestamps are assigned by the server; clients cannot supply `visitedAt`.
 
-## Navigation architecture (planned)
+## Browser navigation and restoration
 
-Persistent Visit records are an append-only audit of navigation attempts, not
-the browser's back/forward stack. A browser session should use an array of
-entries plus a current index: back decrements the index, forward increments it,
-and a new navigation after going back discards entries after that index before
-appending its destination. This keeps ordering and boundaries straightforward.
+`NavigationEngine` owns a Map of person IDs to sessions. Each session uses an
+ordered entry array and integer cursor; discriminated entries represent home,
+website, missing address, or search results. React subscribes using
+`useSyncExternalStore`; presentation and typed API calls remain separate.
+New destinations truncate the forward stack. Genuine repeated visits remain
+distinct. Failed fetches preserve the previous stack; aborted/stale responses
+cannot replace a newer navigation or another person's view.
 
-Before leaving an entry, capture a page snapshot (or an equivalent versioned
-restoration reference), including relevant scroll/form state. Back and forward
-can then restore the page that was left even if its published content changes.
-A missing address should have an error-page entry in that session and a normal
-Visit record containing the attempted address. Do not discard the event merely
-because no Site exists. Record the navigation method for each actual attempt.
+Entries capture original HTML, site metadata, or query/results and scroll position.
+Back/Forward restore those snapshots without another site/search request, even
+if a site changed. A fresh explicit visit fetches current content. Native browser
+history markers restore known entries within the current document, including
+person context. Sessions are memory-only: reloads, leaving the document, and
+development remounts reset them. Home scroll and arbitrary interactive DOM state
+are not captured; forms and page scripts are deliberately unavailable.
 
-Session entries and snapshots are not persisted by this backend. There is no
-session navigation engine yet, and persistent history should not be used to
-reconstruct one automatically.
+Only explicit successful navigation actions and missing-address responses submit
+Visits. Returning to a website records back/forward; search views, initial loads,
+person selection, and passive rerenders do not. A failed Visit POST displays a
+warning without rolling back the page or silently retrying a possibly saved event.
 
-## Current status
+The history panel loads 20 records at a time, newest timestamp then descending
+ObjectId, deduplicates by ID, refreshes after saved visits, and isolates requests
+by person. The API computes `exists` using one indexed address lookup per page;
+it does not alter immutable Visits. Missing labels describe current site existence.
+Live offset pagination can shift under concurrent writes; Refresh reloads page one.
 
-The backend models, publishing/retrieval APIs, persistent visit history, and
-deterministic seed command are implemented. The existing frontend remains an
-initialization page. There is no browser UI, navigation engine, full-text search,
-HTML rendering, authentication, bookmarks, or tabs.
+## Search strategy
+
+`GET /api/search?q=...` accepts 1–100 characters after whitespace normalization,
+up to 10 keywords/quoted phrases, and requires every term to match title,
+address, or visible body text. Empty/malformed queries return 400; no matches
+return an empty list. Matches are case-insensitive substrings. Each term scores
+12 in the title, 8 in the address, and 3 in the body, with a 30-point exact-title
+bonus. Ties sort by address. Results include at most 20 entries and a total count;
+body excerpts use 200-character text windows with ellipses. Search results never include HTML.
+
+parse5 extracts text while excluding scripts, styles, head content, embedded
+documents, and explicitly hidden subtrees. A bounded 128-entry cache compares
+the exact source HTML before reusing parsed text. This small-dataset strategy
+scans site projections on each query without a new MongoDB index or service:
+the existing unique address index serves page/history lookups, while MongoDB's
+token/stemming text search would have different substring/phrase semantics.
+A larger corpus should move extraction to publication time and use a suitable
+indexed search strategy. CSS layout, external styles, and full browser visibility
+are intentionally not evaluated by the extractor.
+
+## HTML containment
+
+DOMPurify allows basic document text, lists, tables, and internal `.zz` links.
+Authored scripts, event handlers, styles, media, forms, embeds, and external links
+are removed or disabled. HTML is rendered only in an opaque-origin `srcDoc`
+iframe with `sandbox="allow-scripts"`; there is no same-origin, popup, form, or
+top-navigation permission. CSP denies network resources and connections.
+Only a nonce-authorized, application-owned script captures internal links and
+scroll position; arbitrary authored JavaScript is never allowed. Parent message
+handling checks the iframe window, opaque origin, per-mount token, and payload.
+This preserves seeded navigation while sacrificing authored styling and active
+content. Publishing UI and the dedicated Step 6 hardening pass remain future work.
+
+## Browser interaction tests
+
+Frontend Vitest covers the engine independently, component interaction, history
+pagination, and malicious markup. Backend integration tests exercise search
+ranking, body matches, validation, and history against isolated MongoDB databases.
+Playwright uses a separate frontend and seeded API fixture on ports 3001/4010;
+it refuses writes unless the API identifies its isolated test database.
+
+Start the existing stack, then run these in separate terminals from the root:
+
+```bash
+docker compose run --rm --no-deps --name small-web-browser-browser-api -p 127.0.0.1:4010:4000 backend sh -c 'npm run build && exec node test/browser-test-server.mjs'
+docker compose run --rm --no-deps --name small-web-browser-browser-ui -p 127.0.0.1:3001:3000 -e NEXT_PUBLIC_API_URL=http://localhost:4010/api frontend npm run dev -- --hostname 0.0.0.0 --port 3000
+```
+
+Wait for `BROWSER_TEST_READY` and Next's ready message. In `frontend`, run
+`npm ci`, `npx playwright install chromium`, then `npm run test:browser` with
+Node.js 24. Alternatively set `CHROME_PATH` to an installed Chrome executable.
+`BROWSER_TEST_URL` and `BROWSER_TEST_API_URL` override the default fixture URLs.
+Stop only the fixtures afterward:
+
+```bash
+docker stop small-web-browser-browser-ui small-web-browser-browser-api
+```
+
+The API fixture removes only its own randomly named test database on graceful
+shutdown. Abrupt termination can leave that test database; never reset the
+development database or remove Docker volumes for browser testing.

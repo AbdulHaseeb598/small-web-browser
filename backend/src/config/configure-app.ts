@@ -1,7 +1,11 @@
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 
-export function configureApp(app: INestApplication, frontendOrigin: string) {
+export function configureApp(
+  app: INestApplication,
+  frontendOrigin: string,
+  options: { shutdownHooks?: boolean } = {},
+) {
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -13,5 +17,5 @@ export function configureApp(app: INestApplication, frontendOrigin: string) {
     }),
   );
   app.enableCors({ origin: frontendOrigin });
-  app.enableShutdownHooks();
+  if (options.shutdownHooks !== false) app.enableShutdownHooks();
 }
