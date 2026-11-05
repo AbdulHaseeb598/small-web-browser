@@ -8,3 +8,5 @@ coverage
 *.log
 *.tsbuildinfo
 .git
+playwright-report
+test-results

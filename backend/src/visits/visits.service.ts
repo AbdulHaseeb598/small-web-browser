@@ -7,12 +7,14 @@ import { normalizeAddress } from '../common/address.js';
 import { Visit } from './visit.schema.js';
 import type { CreateVisitDto } from './create-visit.dto.js';
 import type { HistoryQueryDto } from './history-query.dto.js';
+import { Site } from '../sites/site.schema.js';
 
 @Injectable()
 export class VisitsService {
   constructor(
     @InjectModel(Visit.name) private readonly visits: Model<Visit>,
     @Inject(PeopleService) private readonly people: PeopleService,
+    @InjectModel(Site.name) private readonly sites: Model<Site>,
   ) {}
 
   async create(dto: CreateVisitDto) {
@@ -44,6 +46,24 @@ export class VisitsService {
         .toArray(),
       this.visits.collection.countDocuments(filter),
     ]);
-    return { items, total, page, limit };
+    const addresses = [...new Set(items.map((item) => String(item.address)))];
+    const existing = new Set(
+      (
+        await this.sites
+          .find({ address: { $in: addresses } })
+          .select('address')
+          .lean()
+          .exec()
+      ).map((site) => site.address),
+    );
+    return {
+      items: items.map((item) => ({
+        ...item,
+        exists: existing.has(String(item.address)),
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 }

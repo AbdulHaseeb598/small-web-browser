@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Small Web Browser",
-  description: "A simulated web browser. Project initialization and development infrastructure.",
+  description: "Explore fictional .zz websites with per-person browsing history, snapshot navigation, and full-content search.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
