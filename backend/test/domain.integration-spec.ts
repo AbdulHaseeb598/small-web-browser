@@ -175,6 +175,9 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     expect(listing.body).toHaveLength(1);
     expect(listing.body[0]).not.toHaveProperty('html');
     expect((await connection.collection('sites').findOne())?.html).toBe(html);
+    expect(
+      (await connection.collection('sites').findOne())?.authorId,
+    ).toBeInstanceOf(mongoose.Types.ObjectId);
   });
 
   it('returns 409 when simultaneous publications collide at the unique index', async () => {
@@ -453,6 +456,40 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
       status: 'ok',
       database: 'up',
     });
+  });
+
+  it('reads canonical ObjectId and legacy string person references without rewriting either', async () => {
+    const person = await createPerson();
+    const current = await api<VisitResult>('/visits', {
+      personId: person._id,
+      address: 'current.zz',
+      method: 'typed',
+    });
+    expect(current.status).toBe(201);
+    const saved = await connection
+      .collection('visits')
+      .findOne({ _id: new mongoose.Types.ObjectId(current.body._id) });
+    expect(saved?.personId).toBeInstanceOf(mongoose.Types.ObjectId);
+    const legacy = {
+      _id: new mongoose.Types.ObjectId(),
+      personId: person._id,
+      address: 'legacy.zz',
+      method: 'history',
+      visitedAt: new Date('2025-01-01T00:00:00Z'),
+    };
+    await connection.collection('visits').insertOne(legacy);
+    const response = await api<HistoryResult>(
+      '/people/' + person._id + '/visits',
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.total).toBe(2);
+    expect(response.body.items.map((visit) => visit._id)).toEqual([
+      current.body._id,
+      legacy._id.toHexString(),
+    ]);
+    expect(
+      await connection.collection('visits').findOne({ _id: legacy._id }),
+    ).toEqual(legacy);
   });
 
   it('paginates newest-first history with an ObjectId tie-breaker and person isolation', async () => {

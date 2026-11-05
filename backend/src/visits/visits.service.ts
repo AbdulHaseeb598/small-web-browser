@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
+import { Types } from 'mongoose';
 import { PeopleService } from '../people/people.service.js';
 import { normalizeAddress } from '../common/address.js';
 import { Visit } from './visit.schema.js';
@@ -27,16 +28,21 @@ export class VisitsService {
 
   async history(personId: string, { page, limit }: HistoryQueryDto) {
     await this.people.ensureExists(personId);
-    const filter = { personId };
+    // Older API records could contain string references because the original
+    // schema treated this path as Mixed. Keep those records readable without a
+    // migration. The collection query preserves both BSON types instead of
+    // casting the string branch back to ObjectId. Cursor results are plain data.
+    const filter = {
+      personId: { $in: [new Types.ObjectId(personId), personId] },
+    };
     const [items, total] = await Promise.all([
-      this.visits
+      this.visits.collection
         .find(filter)
         .sort({ visitedAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .lean()
-        .exec(),
-      this.visits.countDocuments(filter).exec(),
+        .toArray(),
+      this.visits.collection.countDocuments(filter),
     ]);
     return { items, total, page, limit };
   }
