@@ -65,7 +65,20 @@ export class SearchService {
       const positions = terms
         .map((term) => body.indexOf(term))
         .filter((index) => index >= 0);
-      const first = positions.length ? Math.min(...positions) : 0;
+      const foldedFirst = positions.length ? Math.min(...positions) : 0;
+      let first = foldedFirst;
+      // Lowercasing can expand characters (İ -> i + combining dot). Translate
+      // the match offset back before slicing the original, capitalized text.
+      if (body.length !== cached.text.length) {
+        first = 0;
+        let foldedOffset = 0;
+        for (const character of cached.text) {
+          const width = character.toLowerCase().length;
+          if (foldedOffset + width > foldedFirst) break;
+          foldedOffset += width;
+          first += character.length;
+        }
+      }
       const start = Math.max(0, first - 65);
       const end = Math.min(cached.text.length, start + 200);
       matches.push({

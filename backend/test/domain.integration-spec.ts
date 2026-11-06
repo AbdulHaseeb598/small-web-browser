@@ -577,6 +577,27 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     expect((await api<Results>('/search?q=replacement')).body.total).toBe(1);
   });
 
+  it('returns relevant late-body excerpts including after Unicode case-fold expansion', async () => {
+    const person = await createPerson();
+    for (const [address, prefix] of [
+      ['late.zz', '<p>Unrelated opening paragraph about ordinary notes.</p>'.repeat(30)],
+      ['unicode-offset.zz', '<p>' + 'İ'.repeat(500) + '</p>'],
+    ]) {
+      expect((await api('/sites', { address, title: 'Late paragraph notes', authorId: person._id, html: prefix + '<p>The Observatory records a+b (plot) details.</p>' })).status).toBe(201);
+    }
+    type Results = { items: { address: string; excerpt: string }[] };
+    const results = await api<Results>('/search?q=observatory');
+    expect(results.status).toBe(200); expect(results.body.items).toHaveLength(2);
+    for (const item of results.body.items) {
+      expect(item.excerpt).toContain('Observatory');
+      expect(item.excerpt.length).toBeLessThanOrEqual(202);
+      expect(item.excerpt.startsWith('…')).toBe(true);
+    }
+    const literal = await api<Results>('/search?q=' + encodeURIComponent('a+b (plot)'));
+    expect(literal.body.items).toHaveLength(2);
+    for (const item of literal.body.items) expect(item.excerpt).toContain('a+b (plot)');
+  });
+
   it('ranks title and address above body-only matches and bounds deterministic results', async () => {
     const person = await createPerson();
     for (const [address, title, html] of [
