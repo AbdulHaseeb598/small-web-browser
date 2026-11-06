@@ -108,6 +108,10 @@ test('wheel over expanded iframe content scrolls the main pane and restores A/B 
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(650);
   await pane.focus(); await page.keyboard.press('PageDown');
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(650);
+  await page.frameLocator('iframe').getByRole('heading', { name: 'Long page B' }).click();
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeLessThan(100);
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
 });
 
 test('garden results and opened pages highlight safely and return with the original query', async ({ page }) => {
