@@ -373,8 +373,18 @@ Back/Forward restore those snapshots without another site/search request, even
 if a site changed. A fresh explicit visit fetches current content. Native browser
 history markers restore known entries within the current document, including
 person context. Sessions are memory-only: reloads, leaving the document, and
-development remounts reset them. Home scroll and arbitrary interactive DOM state
-are not captured; forms and page scripts are deliberately unavailable.
+development remounts reset them. Home, results, missing-page, and website views
+capture their main-pane scroll position. Arbitrary interactive DOM state is not
+captured; forms and page scripts are deliberately unavailable.
+
+The homepage renders the complete catalog without a six-card cap or pagination:
+two columns on wider screens and one below 700px. Newly published sites join the
+same list. `PageView` owns the main scrollbar for every view, including an iframe
+expanded to its sanitized content height. The trusted bridge reports only bounded
+integer heights; parent scroll capture/restoration stays outside the opaque frame.
+History remains independently scrollable. Wheel/trackpad scrolling over the main
+content, keyboard paging, and mobile touch scrolling use native browser behavior;
+there are no global wheel handlers. The toolbar stays outside the scrolling pane.
 
 Memory is bounded to the most recent 50 entries per person (including home
 when retained), 10 most recently selected people, and 500 native-history lookup
@@ -401,6 +411,19 @@ return an empty list. Matches are case-insensitive substrings. Each term scores
 12 in the title, 8 in the address, and 3 in the body, with a 30-point exact-title
 bonus. Ties sort by address. Results include at most 20 entries and a total count;
 body excerpts use 200-character text windows with ellipses. Search results never include HTML.
+Excerpt offsets map back to the original text when Unicode lowercasing expands a
+character, keeping late body matches visible without changing ranking.
+
+Results highlight literal query terms/quoted phrases using React text nodes and
+semantic `<mark>` elements, preserving original capitalization. Matching follows
+the API's intentional substring semantics (`garden` also matches `Gardening`),
+without treating query text as a regular expression. Opening a result captures its
+query with the website snapshot. Sanitized visible text nodes receive the same
+highlights before iframe serialization; attributes, visible URLs, hidden subtrees,
+and generated bridge code are excluded. Back/Forward restore the captured query,
+marks, content, and scroll. Typed/history/link navigation does not inherit a search
+query. In-page phrases split across separate HTML text nodes may not be marked;
+the result title/excerpt still highlights a phrase contained in its plain text.
 
 parse5 extracts text while excluding scripts, styles, head content, embedded
 documents, and explicitly hidden subtrees. A bounded 128-entry cache compares
@@ -455,12 +478,12 @@ are removed or disabled. HTML is rendered only in an opaque-origin `srcDoc`
 iframe with `sandbox="allow-scripts"`; there is no same-origin, popup, form, or
 top-navigation permission. CSP denies network resources and connections.
 Only a nonce-authorized, application-owned script captures internal links and
-scroll position; arbitrary authored JavaScript is never allowed. Parent message
+reports layout height; arbitrary authored JavaScript is never allowed. Parent message
 handling checks a browser-generated message event, iframe window, opaque origin,
 per-mount token, exact payload shape, and a destination declared by that rendered
 page. `origin === "null"` alone is never accepted as authentication. The bridge
 uses captured link targets and accepts only trusted user clicks, including
-keyboard activation. It exposes only link navigation and bounded scroll values.
+keyboard activation. It exposes only link navigation and bounded layout heights.
 Oversized imported HTML gets a safe placeholder before sanitization.
 
 Supported content includes headings, paragraphs, lists, emphasis, code, quotes,
@@ -497,6 +520,11 @@ opaque-origin parent/storage/cookie isolation, blocked fetch/top navigation,
 zero external resource requests, disabled unsafe markup, forged messages, and
 working safe links. DevTools evaluation deliberately probes browser restrictions;
 it is separate from checks that authored scripts never execute.
+
+UI regressions also cover the full seeded catalog, more than ten sites, newly
+published cards, the two-/one-column grid, main-pane wheel and keyboard scrolling,
+independent History scrolling, mobile touch gestures, search highlighting,
+literal/XSS-like query strings, relevant late-body excerpts, and scroll restoration.
 
 Run browser tests and backend integration checks sequentially on constrained
 machines; cold Node CLI launches can exceed the seed suite's 10-second timeout

@@ -1,5 +1,5 @@
 'use client';
-import dynamic from 'next/dynamic';
+import { PageView } from './page-view';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { browserApi } from '../lib/api';
 import type { BrowserApi, Person, SiteMetadata } from '../lib/browser-types';
@@ -10,7 +10,7 @@ import { HistoryPanel } from './history-panel';
 import { SearchResults } from './search-results';
 import { PublishDialog } from './publish-dialog';
 
-const PageFrame = dynamic(() => import('./page-frame'), { ssr: false, loading: () => <p role="status" className="quiet-state">Preparing page…</p> });
+
 
 export default function BrowserApplication() {
   const [retry, setRetry] = useState(0);
@@ -54,11 +54,11 @@ export function BrowserApp({ api, onRetry }: { api: BrowserApi; onRetry: () => v
         <div className="search-strip"><span className="network-label"><span aria-hidden="true" />FICTIONAL .ZZ NETWORK</span><SearchForm key={entry.id + '-search'} query={entry.kind === 'search' ? entry.result.query : ''} onSearch={(query) => { void engine.search(query); }} /></div>
         {snapshot.error && <p className="notice error-notice" role="alert">{snapshot.error}</p>}
         {snapshot.recordingError && <p className="notice" role="alert">{snapshot.recordingError}</p>}
-        <div className="browser-body"><section className="view-pane" aria-label="Current page" aria-busy={snapshot.pending}>
-          {snapshot.pending && <div className="loading-line" role="status">Opening…</div>}
-          <div className="view-caption"><span>{entry.kind === 'website' ? entry.site.title : entry.kind === 'search' ? 'Search · ' + entry.result.query : entry.kind === 'missing' ? 'Page not found' : 'Start exploring'}</span><span>{entry.kind === 'website' || entry.kind === 'missing' ? address : 'Small Web Browser'}</span></div>
-          {entry.kind === 'website' ? <PageFrame key={entry.id} html={entry.site.html} title={entry.site.title} scrollY={entry.scrollY} onLink={onLink} onScroll={onScroll} /> : entry.kind === 'search' ? <SearchResults key={entry.id} entry={entry} onNavigate={(address) => { void engine.navigate(address, 'search'); }} onScroll={onScroll} /> : entry.kind === 'missing' ? <div className="missing-view content-scroll"><span className="large-code" aria-hidden="true">404</span><span className="eyebrow">A TURN IN THE TRAIL</span><h1>This address has no page.</h1><code>{entry.address}</code><p>The link led somewhere that has not been published yet. Return with Back, search for a related topic, or try another address.</p></div> : <div className="welcome-view content-scroll"><span className="eyebrow">A SMALL WEB, READY TO EXPLORE</span><h1>Follow your curiosity.<br /><em>Leave a trail.</em></h1><p>Type a fictional address, follow a link, or search the words inside a page. Your browsing history belongs to the person selected above.</p><div className="welcome-divider"><h2>Places to begin</h2><span>{data.sites.length} published pages</span></div>{data.sites.length === 0 ? <p className="quiet-state">No sites have been published yet. An unknown address will show a missing-page view.</p> : <div className="discovery-grid">{data.sites.slice(0, 6).map((site) => <button key={site._id} onClick={() => { void engine.navigate(site.address, 'typed'); }}><span>{site.title}</span><code>{site.address} <span aria-hidden="true">↗</span></code></button>)}</div>}</div>}
-        </section><HistoryPanel personId={snapshot.personId} version={session.historyVersion} api={api} onNavigate={onHistory} open={historyOpen} /></div>
+        <div className="browser-body"><PageView key={entry.id} entry={entry} pending={snapshot.pending} onLink={onLink} onScroll={onScroll} caption={
+
+          <div className="view-caption"><span>{entry.kind === 'website' ? entry.site.title : entry.kind === 'search' ? 'Search · ' + entry.result.query : entry.kind === 'missing' ? 'Page not found' : 'Start exploring'}</span><span>{entry.kind === 'website' || entry.kind === 'missing' ? address : 'Small Web Browser'}</span></div>}>
+          {entry.kind === 'website' ? null : entry.kind === 'search' ? <SearchResults key={entry.id} entry={entry} onNavigate={(address) => { void engine.navigate(address, 'search'); }} /> : entry.kind === 'missing' ? <div className="missing-view content-scroll"><span className="large-code" aria-hidden="true">404</span><span className="eyebrow">A TURN IN THE TRAIL</span><h1>This address has no page.</h1><code>{entry.address}</code><p>The link led somewhere that has not been published yet. Return with Back, search for a related topic, or try another address.</p></div> : <div className="welcome-view content-scroll"><span className="eyebrow">A SMALL WEB, READY TO EXPLORE</span><h1>Follow your curiosity.<br /><em>Leave a trail.</em></h1><p>Type a fictional address, follow a link, or search the words inside a page. Your browsing history belongs to the person selected above.</p><div className="welcome-divider"><h2>Places to begin</h2><span>{data.sites.length} published pages</span></div>{data.sites.length === 0 ? <p className="quiet-state">No sites have been published yet. An unknown address will show a missing-page view.</p> : <div className="discovery-grid">{data.sites.map((site) => <button key={site._id} onClick={() => { void engine.navigate(site.address, 'typed'); }}><span>{site.title}</span><code>{site.address} <span aria-hidden="true">↗</span></code></button>)}</div>}</div>}
+        </PageView><HistoryPanel personId={snapshot.personId} version={session.historyVersion} api={api} onNavigate={onHistory} open={historyOpen} /></div>
       </section><footer className="app-footer"><span>Fictional pages. Real paths of discovery.</span><span>Page scripts and external resources are blocked.</span></footer>
     </> : null}
   </div>;

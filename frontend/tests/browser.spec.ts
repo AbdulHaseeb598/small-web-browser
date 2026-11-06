@@ -90,15 +90,15 @@ test('return restores captured HTML and scroll without refetching; new visit fet
   await page.locator('iframe').evaluate((frame: HTMLIFrameElement) => frame.contentWindow?.postMessage({}, '*'));
   const content = page.frames().find((frame) => frame.url() === 'about:srcdoc')!;
   await content.waitForLoadState('load');
-  await content.evaluate(() => window.scrollTo(0, 650));
-  await expect.poll(() => content.evaluate(() => window.scrollY)).toBe(650);
+  await page.locator('.view-pane').evaluate((element) => { element.scrollTop = 650; });
+  await expect.poll(() => page.locator('.view-pane').evaluate((element) => element.scrollTop)).toBe(650);
   await page.waitForTimeout(250); // Bridge publishes scroll on a throttled animation frame.
   await go(page, 'tidepool.zz');
   await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Tidepool Field Station' })).toBeVisible();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Original snapshot' })).toBeVisible();
-  expect(await page.locator('iframe').getAttribute('srcdoc')).toContain('scrollTo(0,650)');
-  await expect.poll(() => page.frames().find((frame) => frame.url() === 'about:srcdoc')!.evaluate(() => window.scrollY)).toBe(650);
+
+  await expect.poll(() => page.locator('.view-pane').evaluate((element) => element.scrollTop)).toBe(650);
   expect(reads).toBe(1);
   await go(page, address);
   await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Changed snapshot' })).toBeVisible();
@@ -261,7 +261,7 @@ test('search results restore their scroll position and query without refetch', a
   await page.getByLabel('Search the small web').fill('a');
   await page.getByLabel('Search the small web').press('Enter');
   await expect(page.getByRole('heading', { name: 'Search results', exact: true })).toBeVisible();
-  const results = page.locator('.search-results');
+  const results = page.locator('.view-pane');
   await results.evaluate((element) => { element.scrollTop = 350; });
   await expect.poll(() => results.evaluate((element) => element.scrollTop)).toBeGreaterThan(300);
   const result = page.locator('.result-card').nth(3);
