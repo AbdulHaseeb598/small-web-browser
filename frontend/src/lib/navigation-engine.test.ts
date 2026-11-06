@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { NavigationEngine } from './navigation-engine';
+import { MAX_PERSON_SESSIONS, MAX_SESSION_ENTRIES, NavigationEngine } from './navigation-engine';
 import type { BrowserApi, Site, SearchResponse } from './browser-types';
 
 const page = (address: string, html = '<h1>Original snapshot</h1>'): Site => ({ _id: address, address, title: address, html, authorId: 'p1', createdAt: '', updatedAt: '' });
@@ -21,6 +21,28 @@ function deferred<T>() {
 }
 
 describe('Independent browser navigation engine', () => {
+  it('bounds retained snapshots while preserving recent entries and traversal', async () => {
+    const { engine, current } = setup();
+    await engine.navigate('first.zz'); const first = current().id;
+    for (let n = 0; n < MAX_SESSION_ENTRIES + 5; n++) await engine.navigate('page' + n + '.zz');
+    expect(engine.getSnapshot().session?.entries).toHaveLength(MAX_SESSION_ENTRIES);
+    expect(engine.hasEntry('p1', first)).toBe(false);
+    engine.go(-1); expect(current()).toMatchObject({ kind: 'website', site: { address: 'page53.zz' } });
+    engine.go(1); expect(current()).toMatchObject({ kind: 'website', site: { address: 'page54.zz' } });
+  });
+  it('evicts the least recently selected person without sharing their session', async () => {
+    const { engine, current } = setup(); await engine.navigate('first.zz');
+    for (let n = 0; n < MAX_PERSON_SESSIONS; n++) engine.selectPerson('person-' + n);
+    engine.selectPerson('p1'); expect(current().kind).toBe('home');
+    expect(engine.getSnapshot().session?.entries).toHaveLength(1);
+  });
+  it('does not rerender for unchanged scroll values or persist on session reload', async () => {
+    const { engine, api, current } = setup();
+    const listener = vi.fn(); engine.subscribe(listener); engine.setScroll(current().id, 0);
+    expect(listener).not.toHaveBeenCalled();
+    await engine.navigate('a.zz'); const fresh = new NavigationEngine(api); fresh.selectPerson('p1');
+    expect(fresh.getSnapshot().session?.entries[0].kind).toBe('home'); expect(api.record).toHaveBeenCalledTimes(1);
+  });
   it('does not persist passive hydration or person selection', () => {
     const { engine, api } = setup(); engine.selectPerson('p2'); engine.selectPerson('p1');
     expect(api.record).not.toHaveBeenCalled(); expect(engine.getSnapshot().session?.entries).toHaveLength(1);

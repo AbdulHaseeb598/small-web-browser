@@ -1,6 +1,6 @@
 'use client';
 import { useEffect } from 'react';
-import type { NavigationEngine } from './navigation-engine';
+import { MAX_PERSON_SESSIONS, MAX_SESSION_ENTRIES, type NavigationEngine } from './navigation-engine';
 
 type Marker = { owner: string; personId: string; entryId: string; position: number };
 function marker(value: unknown): value is Marker {
@@ -27,6 +27,7 @@ export function useBrowserHistory(engine: NavigationEngine) {
       for (const key of markers.keys()) if (key > position) markers.delete(key);
       const next = { owner, position, personId: transition.personId, entryId: transition.entryId };
       markers.set(position, next);
+      if (markers.size > MAX_PERSON_SESSIONS * MAX_SESSION_ENTRIES) markers.delete(markers.keys().next().value!);
       const state = { ...window.history.state, smallBrowser: next };
       if (replace) window.history.replaceState(state, ''); else window.history.pushState(state, '');
       initialized = true;
