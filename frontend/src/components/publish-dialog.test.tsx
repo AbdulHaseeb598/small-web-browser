@@ -51,12 +51,16 @@ describe('Publishing dialog', () => {
     expect((screen.getByLabelText('HTML content') as HTMLTextAreaElement).value).toBe(site.html);
     expect((screen.getByLabelText('Website address') as HTMLInputElement).value).toBe(' NEW.ZZ ');
   });
-  it('rejects unsafe addresses and whitespace-only HTML without a request', async () => {
+  it('rejects unsafe addresses, whitespace and oversized HTML without truncating or requesting', async () => {
     const publish = vi.fn(async () => site);
     render(<PublishDialog open people={people} publish={publish} onClose={vi.fn()} onPublished={vi.fn()} onOpenSite={vi.fn()} />);
     fill('javascript:alert(1)'); fireEvent.click(screen.getByRole('button', { name: 'Publish website' }));
     expect((await screen.findByRole('alert')).textContent).toContain('valid .zz address');
     fill('valid.zz', '   '); fireEvent.click(screen.getByRole('button', { name: 'Publish website' }));
     expect(screen.getByRole('alert').textContent).toContain('Enter HTML'); expect(publish).not.toHaveBeenCalled();
+    fill('valid.zz', 'x'.repeat(100001)); fireEvent.click(screen.getByRole('button', { name: 'Publish website' }));
+    expect(screen.getByRole('alert').textContent).toContain('100,000');
+    expect((screen.getByLabelText('HTML content') as HTMLTextAreaElement).value).toHaveLength(100001);
+    expect(publish).not.toHaveBeenCalled();
   });
 });

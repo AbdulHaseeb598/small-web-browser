@@ -281,6 +281,36 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     },
   );
 
+  it('preserves full allowed HTML and rejects oversized publications without truncation', async () => {
+    const person = await createPerson();
+    const html = ' ' + 'x'.repeat(99998) + '\n';
+    const payload = { address: 'large.zz', title: 'Large', html, authorId: person._id };
+    const created = await api<SiteResult>('/sites', payload);
+    expect(created.status).toBe(201);
+    expect(created.body.html).toBe(html);
+    expect((await api<SiteResult>('/sites/large.zz')).body.html).toBe(html);
+    expect((await api('/sites', { ...payload, address: 'too-large.zz', html: 'x'.repeat(100001) })).status).toBe(400);
+    expect((await api('/sites', { ...payload, address: 'transport-limit.zz', html: 'x'.repeat(110000) })).status).toBe(413);
+    expect(await connection.collection('sites').countDocuments()).toBe(1);
+  });
+
+  it('stores Unicode HTML exactly and returns publication matches in body search', async () => {
+    const person = await createPerson();
+    const html = ' \n<h1>سلام &amp; café</h1><p>publicationneedle Ω</p>\n ';
+    const created = await api<SiteResult>('/sites', { address: 'unicode.zz', title: '<b>Literal title</b>', html, authorId: person._id });
+    expect(created.status).toBe(201); expect(created.body.html).toBe(html);
+    const response = await api<{ items: { address: string }[] }>('/search?q=publicationneedle');
+    expect(response.status).toBe(200); expect(response.body.items[0].address).toBe('unicode.zz');
+  });
+
+  it('searches size-valid deeply nested publications without stack overflow', async () => {
+    const person = await createPerson();
+    const html = '<div>'.repeat(9000) + 'deepsearchneedle' + '</div>'.repeat(9000);
+    expect((await api('/sites', { address: 'deep.zz', title: 'Deep document', html, authorId: person._id })).status).toBe(201);
+    const response = await api<{ items: { address: string }[] }>('/search?q=deepsearchneedle');
+    expect(response.status).toBe(200); expect(response.body.items[0].address).toBe('deep.zz');
+  });
+
   it('rejects missing, mistyped, and unexpected publication fields without persisting a site', async () => {
     const person = await createPerson();
     const valid: Record<string, unknown> = {
