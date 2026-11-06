@@ -1,9 +1,10 @@
 # Small Web Browser
 
-A technical assessment project for a simulated web browser. Steps 1 through 5
+A technical assessment project for a simulated web browser. Steps 1 through 7
 provide Docker development infrastructure, persistent people/sites/visits,
 deterministic demonstration data, and a responsive browser with per-person
-navigation, history, full-content search, and contained HTML rendering.
+navigation, history, full-content search, website publishing, and hardened HTML
+containment, with unit, MongoDB integration, and Chrome regression coverage.
 
 ## Stack and structure
 
@@ -316,7 +317,9 @@ index rather than only a pre-insert lookup. Domain errors use Nest's standard
 health endpoint retains its existing readiness response format.
 
 Names are limited to 120 characters, titles to 200, and nonempty HTML strings
-to 100,000 characters, subject also to the server's JSON request-size limit.
+to 100,000 characters, subject also to the server's 100 KiB JSON request-size
+limit (UTF-8 bytes, including metadata and JSON escaping). Whitespace-only HTML
+is rejected. Oversized requests return 413; field validation returns 400.
 HTML is stored without trimming, rewriting, or sanitizing, including leading
 and trailing whitespace. Rendering applies a separate restrictive boundary;
 the stored original is preserved. External pages are never fetched.
@@ -373,6 +376,11 @@ person context. Sessions are memory-only: reloads, leaving the document, and
 development remounts reset them. Home scroll and arbitrary interactive DOM state
 are not captured; forms and page scripts are deliberately unavailable.
 
+Memory is bounded to the most recent 50 entries per person (including home
+when retained), 10 most recently selected people, and 500 native-history lookup
+markers. Older snapshots/sessions are evicted; persistent Visit history is not
+deleted. Native history can restore only entries retained in the current document.
+
 Only explicit successful navigation actions and missing-address responses submit
 Visits. Returning to a website records back/forward; search views, initial loads,
 person selection, and passive rerenders do not. A failed Visit POST displays a
@@ -404,6 +412,41 @@ A larger corpus should move extraction to publication time and use a suitable
 indexed search strategy. CSS layout, external styles, and full browser visibility
 are intentionally not evaluated by the extractor.
 
+## Publish a website
+
+1. Start Docker, run `docker compose exec backend npm run seed`, and open
+   http://localhost:3000. Choose a browsing identity.
+2. Select **Publish**, then choose a publisher, `.zz` address, title, and HTML.
+   Publisher selection does not switch the browsing identity.
+3. Submit **Publish website**. The dialog blocks concurrent submissions and
+   preserves failed drafts. Duplicate addresses receive a clear 409 message.
+4. Select **Open published site** to browse as the original browsing identity,
+   or close the dialog to keep the current page. Publishing alone creates no Visit.
+
+New sites appear in the local discovery catalog and server search immediately.
+Existing page/search snapshots stay unchanged until an explicit new request.
+HTML is stored exactly, including whitespace; it is never silently truncated.
+Drafts live only in the current React mount and are lost on reload. A network
+failure can occur after a save: check the address before retrying. There is no
+editing, deletion, preview execution, authentication, or ownership enforcement.
+Oversized HTML remains in the editor with a validation error rather than being
+cut off by a textarea character limit.
+
+For a first manual page, use a unique address and this HTML:
+
+```html
+<h1>My small web page</h1>
+<p>A searchable body word: ferncompass.</p>
+<ul>
+  <li><a href="tidepool.zz">Explore the tidepool</a></li>
+  <li><a href="unpublished-demo.zz">Try a missing page</a></li>
+</ul>
+```
+
+Search `ferncompass`, follow both links, use Back/Forward, then switch people
+and verify each person's history. Manual navigation intentionally adds Visits;
+automated tests use a disposable database instead.
+
 ## HTML containment
 
 DOMPurify allows basic document text, lists, tables, and internal `.zz` links.
@@ -413,17 +456,51 @@ iframe with `sandbox="allow-scripts"`; there is no same-origin, popup, form, or
 top-navigation permission. CSP denies network resources and connections.
 Only a nonce-authorized, application-owned script captures internal links and
 scroll position; arbitrary authored JavaScript is never allowed. Parent message
-handling checks the iframe window, opaque origin, per-mount token, and payload.
-This preserves seeded navigation while sacrificing authored styling and active
-content. Publishing UI and the dedicated Step 6 hardening pass remain future work.
+handling checks a browser-generated message event, iframe window, opaque origin,
+per-mount token, exact payload shape, and a destination declared by that rendered
+page. `origin === "null"` alone is never accepted as authentication. The bridge
+uses captured link targets and accepts only trusted user clicks, including
+keyboard activation. It exposes only link navigation and bounded scroll values.
+Oversized imported HTML gets a safe placeholder before sanitization.
+
+Supported content includes headings, paragraphs, lists, emphasis, code, quotes,
+tables, and normalized internal links. Authored CSS, scripts, forms, images,
+SVG/MathML, embeds, metadata, `id`/`name`, event handlers, and external,
+`javascript:`, `data:`, and `blob:` URLs are intentionally unavailable. Malformed
+markup may lose content. The sanitizer and browser sandbox are separate layers;
+future changes must preserve both. See the [DOMPurify threat model](https://github.com/cure53/DOMPurify/wiki/Security-Goals-%26-Threat-Model)
+and [iframe sandbox specification](https://html.spec.whatwg.org/dev/iframe-embed-object.html).
+
+Residual risks: this is a local assessment without authentication, rate limiting,
+or production controls. Published text can still be misleading. Bounded input and
+snapshot retention reduce memory exposure but do not guarantee availability
+under sustained load. Search scans the small corpus, and people/site metadata
+listings remain unpaginated. Keep DOMPurify and browsers updated; automated attack
+cases are regression evidence, not proof against every future browser vulnerability.
 
 ## Browser interaction tests
 
 Frontend Vitest covers the engine independently, component interaction, history
-pagination, and malicious markup. Backend integration tests exercise search
-ranking, body matches, validation, and history against isolated MongoDB databases.
+pagination, publishing errors, and malicious markup. Backend integration tests
+exercise search, publication validation/size limits, exact HTML persistence,
+unique-address races, deeply nested HTML extraction, history, and seed regressions
+against isolated databases. Search text extraction uses an explicit work stack
+so deeply nested, size-valid pages cannot overflow recursive traversal.
 Playwright uses a separate frontend and seeded API fixture on ports 3001/4010;
 it refuses writes unless the API identifies its isolated test database.
+
+Chrome scenarios cover four linked pages, native/application traversal, forward
+truncation, repeats, missing pages, snapshots, page/search scroll, person switching,
+reload reset, stale responses, failures, publishing, retry/409 recovery, keyboard
+access, responsive layouts, and malicious publication. Security probes verify
+opaque-origin parent/storage/cookie isolation, blocked fetch/top navigation,
+zero external resource requests, disabled unsafe markup, forged messages, and
+working safe links. DevTools evaluation deliberately probes browser restrictions;
+it is separate from checks that authored scripts never execute.
+
+Run browser tests and backend integration checks sequentially on constrained
+machines; cold Node CLI launches can exceed the seed suite's 10-second timeout
+when Docker and Chrome compete for CPU. Do not raise timeouts to hide assertions.
 
 Start the existing stack, then run these in separate terminals from the root:
 

@@ -1,6 +1,11 @@
 import { visibleText } from './visible-text.js';
 
 describe('HTML text extraction for search', () => {
+  it('extracts text from deeply nested HTML within the publication size limit', () => {
+    const html = '<div>'.repeat(9000) + 'Deepneedle' + '</div>'.repeat(9000);
+    expect(html.length).toBeLessThan(100000);
+    expect(visibleText(html)).toBe('Deepneedle');
+  });
   it('preserves words split by inline markup and separates block boundaries', () => {
     expect(visibleText('<p>photo<b>diodes</b></p><p>sky<br>map</p>')).toBe('photodiodes sky map');
   });

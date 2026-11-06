@@ -19,7 +19,12 @@ const boundaries = new Set([
 ]);
 export function visibleText(html: string): string {
   const chunks: string[] = [];
-  function walk(node: DefaultTreeAdapterMap['node']) {
+  // An explicit work stack avoids call-stack overflow for deeply nested but
+  // size-valid authored HTML. String markers preserve block boundaries.
+  const pending: (DefaultTreeAdapterMap['node'] | string)[] = [parse(html)];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (typeof node === 'string') { chunks.push(node); continue; }
     if ('tagName' in node) {
       if (
         excluded.has(node.tagName) ||
@@ -31,14 +36,15 @@ export function visibleText(html: string): string {
               /display\s*:\s*none|visibility\s*:\s*hidden/i.test(attr.value)),
         )
       )
-        return;
+        continue;
     }
     const boundary = 'tagName' in node && boundaries.has(node.tagName);
     if (boundary) chunks.push(' ');
     if ('value' in node && node.nodeName === '#text') chunks.push(node.value);
-    if ('childNodes' in node) for (const child of node.childNodes) walk(child);
-    if (boundary) chunks.push(' ');
+    if (boundary) pending.push(' ');
+    if ('childNodes' in node) {
+      for (let index = node.childNodes.length - 1; index >= 0; index--) pending.push(node.childNodes[index]);
+    }
   }
-  walk(parse(html));
   return chunks.join('').replace(/\s+/g, ' ').trim();
 }

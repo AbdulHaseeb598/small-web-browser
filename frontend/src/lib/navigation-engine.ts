@@ -4,6 +4,8 @@ import type { BrowserApi, NavigationEntry, NavigationMethod } from './browser-ty
 export interface Session { entries: NavigationEntry[]; index: number; historyVersion: number }
 export interface BrowserSnapshot { personId: string | null; session: Session | null; pending: boolean; error: string | null; recordingError: string | null }
 export type Transition = { type: 'push' | 'traverse' | 'select'; personId: string; entryId: string; delta: number };
+export const MAX_SESSION_ENTRIES = 50;
+export const MAX_PERSON_SESSIONS = 10;
 
 // Pure application state: no React, DOM, persistent storage, or network effects on hydration.
 export class NavigationEngine {
@@ -40,8 +42,12 @@ export class NavigationEngine {
     let session = this.sessions.get(personId);
     if (!session) {
       session = { entries: [{ id: 'home-' + personId, kind: 'home', scrollY: 0 }], index: 0, historyVersion: 0 };
-      this.sessions.set(personId, session);
     }
+    // Person selection defines recency. Pending visit responses never resurrect
+    // evicted sessions, and all retained entries keep their exact snapshots.
+    this.sessions.delete(personId);
+    this.sessions.set(personId, session);
+    if (this.sessions.size > MAX_PERSON_SESSIONS) this.sessions.delete(this.sessions.keys().next().value!);
     this.publish({ personId, session, pending: false, error: null, recordingError: null });
     this.transition('select');
   }
@@ -55,7 +61,7 @@ export class NavigationEngine {
 
   setScroll(entryId: string, scrollY: number) {
     const session = this.snapshot.session;
-    if (!session || session.entries[session.index].id !== entryId || !Number.isFinite(scrollY)) return;
+    if (!session || session.entries[session.index].id !== entryId || !Number.isFinite(scrollY) || session.entries[session.index].scrollY === Math.max(0, scrollY)) return;
     const entries = [...session.entries];
     entries[session.index] = { ...entries[session.index], scrollY: Math.max(0, scrollY) };
     this.save({ ...session, entries });
@@ -64,7 +70,7 @@ export class NavigationEngine {
   private append(entry: NavigationEntry) {
     const session = this.snapshot.session;
     if (!session) return;
-    const entries = [...session.entries.slice(0, session.index + 1), entry];
+    const entries = [...session.entries.slice(0, session.index + 1), entry].slice(-MAX_SESSION_ENTRIES);
     this.save({ ...session, entries, index: entries.length - 1 });
     this.publish({ pending: false, error: null });
     this.transition('push');

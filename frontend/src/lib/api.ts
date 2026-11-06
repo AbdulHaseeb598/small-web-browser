@@ -5,7 +5,7 @@ export const publicApiUrl =
 // Server-side requests can use the backend service on the Compose network.
 export const serverApiUrl = process.env.API_URL ?? publicApiUrl;
 
-import type { BrowserApi, HistoryPage, Person, SearchResponse, SearchResult, Site, SiteMetadata, Visit } from './browser-types';
+import type { BrowserApi, HistoryPage, Person, Publication, SearchResponse, SearchResult, Site, SiteMetadata, Visit } from './browser-types';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
@@ -31,6 +31,9 @@ async function request(path: string, signal?: AbortSignal, body?: unknown): Prom
 function decode<T>(data: unknown, guard: (value: unknown) => value is T): T {
   if (!guard(data)) throw new Error('Unexpected API response');
   return data;
+}
+export async function publishSite(input: Publication, signal?: AbortSignal): Promise<Site> {
+  return decode(await request('/sites', signal, input), site);
 }
 export const browserApi: BrowserApi = {
   people: async (signal) => decode(await request('/people', signal), (v): v is Person[] => Array.isArray(v) && v.every(person)),

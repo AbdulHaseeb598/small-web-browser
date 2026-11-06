@@ -23,8 +23,8 @@ export class Site {
   @Prop({ type: String, required: true, trim: true, maxlength: 200 })
   title!: string;
 
-  // Store the authored string exactly; rendering/sanitization belongs to a later step.
-  @Prop({ type: String, required: true, maxlength: 100000 })
+  // Preserve the authored string; the frontend sanitizes only its rendered copy.
+  @Prop({ type: String, required: true, maxlength: 100000, validate: /\S/ })
   html!: string;
 
   @Prop({
