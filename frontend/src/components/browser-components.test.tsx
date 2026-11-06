@@ -7,12 +7,23 @@ import { AddressForm, SearchForm } from './browser-forms';
 import { HistoryPanel } from './history-panel';
 import type { BrowserApi, HistoryPage, Visit } from '../lib/browser-types';
 import PageFrame from './page-frame';
+import { BrowserApp } from './browser-app';
 
 afterEach(cleanup);
 const item = (n: number, personId = 'p1'): Visit => ({ _id: n.toString(16).padStart(24, '0'), personId, address: 'page' + n + '.zz', visitedAt: '2026-01-01T10:00:00Z', method: 'typed', exists: n !== 1 });
 const api = (): BrowserApi => ({ people: vi.fn(async () => []), sites: vi.fn(async () => []), site: vi.fn(async () => null), search: vi.fn(async (query) => ({ query, items: [], total: 0, limit: 20 })), record: vi.fn(async () => {}), history: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 20 })) });
 
 describe('Accessible forms and per-person history', () => {
+  it('renders the complete dynamic homepage catalog and correct count without passive visits', async () => {
+    const client = api();
+    vi.mocked(client.people).mockResolvedValue([{ _id: 'p1', name: 'Person', createdAt: '' }]);
+    vi.mocked(client.sites).mockResolvedValue(Array.from({ length: 13 }, (_, n) => ({ _id: 's' + n, address: 'page' + n + '.zz', title: 'Page ' + n, authorId: 'p1', createdAt: '', updatedAt: '' })));
+    const { container } = render(<BrowserApp api={client} onRetry={vi.fn()} />);
+    await screen.findByText('13 published pages');
+    expect(container.querySelectorAll('.discovery-grid button')).toHaveLength(13);
+    expect(screen.getByRole('button', { name: /Page 12/ })).toBeTruthy();
+    expect(client.record).not.toHaveBeenCalled();
+  });
   it('submits addresses and search queries with Enter without passive actions', async () => {
     const go = vi.fn(); const search = vi.fn(); const user = userEvent.setup();
     render(<><AddressForm address="" onGo={go} /><SearchForm query="" onSearch={search} /></>);
@@ -47,7 +58,7 @@ describe('Accessible forms and per-person history', () => {
   });
   it('renders an opaque sandbox and ignores forged messages from other windows', () => {
     const link = vi.fn(); const scroll = vi.fn();
-    render(<PageFrame html="<p>Hello</p>" title="Test page" scrollY={0} onLink={link} onScroll={scroll} />);
+    render(<PageFrame html="<p>Hello</p>" title="Test page" onLink={link} onReady={scroll} />);
     const iframe = screen.getByTitle('Website: Test page');
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts'); expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
     window.dispatchEvent(new MessageEvent('message', { source: window, origin: 'null', data: { token: 'forged', type: 'link', value: 'a.zz' } }));

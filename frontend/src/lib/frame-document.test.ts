@@ -21,7 +21,7 @@ describe('Isolated page document', () => {
     '<svg><foreignObject><iframe src="https://evil.example"></iframe></foreignObject></svg>',
     '<a id="parent" name="location" target="_top" ping="https://evil.example" download href="https://evil.example">Escape</a>',
   ])('contains an attack vector: %s', (attack) => {
-    const { srcDoc, links } = frameDocument('<h2>Safe text</h2><a href="safe.zz">Safe link</a>' + attack, 'token', 'nonce', 0);
+    const { srcDoc, links } = frameDocument('<h2>Safe text</h2><a href="safe.zz">Safe link</a>' + attack, 'token', 'nonce');
     const doc = new DOMParser().parseFromString(srcDoc, 'text/html');
     expect(doc.querySelectorAll('script')).toHaveLength(1);
     expect(doc.querySelectorAll('style')).toHaveLength(1);
@@ -33,9 +33,9 @@ describe('Isolated page document', () => {
     expect([...links]).toEqual(['safe.zz']);
   });
   it('fails closed on oversized imported HTML and invalid trusted capabilities', () => {
-    const { srcDoc, links } = frameDocument('x'.repeat(100001) + '<a href="a.zz">X</a>', 'token', 'nonce', 0);
+    const { srcDoc, links } = frameDocument('x'.repeat(100001) + '<a href="a.zz">X</a>', 'token', 'nonce');
     expect(srcDoc).toContain('too large to display safely'); expect(links.size).toBe(0);
-    expect(() => frameDocument('<p>X</p>', '</script>', 'nonce', 0)).toThrow('Invalid frame capability');
+    expect(() => frameDocument('<p>X</p>', '</script>', 'nonce')).toThrow('Invalid frame capability');
   });
   it('rejects undeclared addresses, extra fields, inherited properties, and invalid scrolling', () => {
     const links = new Set(['a.zz']);
@@ -52,7 +52,7 @@ describe('Isolated page document', () => {
   });
   it('removes executable content, resources, forms, metadata, and clobbering attributes', () => {
     const malicious = '<base href="https://evil.example"><meta http-equiv="refresh" content="0;url=https://evil.example"><style>body{background:url(https://evil.example)}</style><script>parent.compromised=true</script><img src="https://evil.example" onerror="alert(1)"><iframe src="https://evil.example"></iframe><form action="/api/people"><input name="parent"></form><svg onload="alert(1)"></svg><p id="parent" style="color:red" onclick="alert(1)">Safe paragraph</p><a href="javascript:alert(1)">Bad</a>';
-    const { srcDoc: source } = frameDocument(malicious, 'token', 'nonce', 50);
+    const { srcDoc: source } = frameDocument(malicious, 'token', 'nonce');
     const doc = new DOMParser().parseFromString(source, 'text/html');
     expect(doc.querySelectorAll('script')).toHaveLength(1);
     expect(doc.querySelector('script')?.textContent).not.toContain('compromised');
@@ -65,7 +65,7 @@ describe('Isolated page document', () => {
     expect(doc.querySelector('a')?.hasAttribute('href')).toBe(false);
   });
   it('rewrites only normalized fictional links and prevents external or relative navigation', () => {
-    const doc = new DOMParser().parseFromString(frameDocument('<a href=" TidePool.ZZ " target="_top">Open</a><a href="https://example.com">External</a><a href="/api/people">API</a><a href="//evil.example">Protocol relative</a>', 'token', 'nonce', 0).srcDoc, 'text/html');
+    const doc = new DOMParser().parseFromString(frameDocument('<a href=" TidePool.ZZ " target="_top">Open</a><a href="https://example.com">External</a><a href="/api/people">API</a><a href="//evil.example">Protocol relative</a>', 'token', 'nonce').srcDoc, 'text/html');
     const anchors = doc.querySelectorAll('a');
     expect(anchors[0].getAttribute('data-address')).toBe('tidepool.zz');
     expect(anchors[0].getAttribute('href')).toBe('#'); expect(anchors[0].hasAttribute('target')).toBe(false);

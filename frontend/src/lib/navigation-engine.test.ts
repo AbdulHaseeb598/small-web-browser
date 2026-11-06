@@ -21,6 +21,14 @@ function deferred<T>() {
 }
 
 describe('Independent browser navigation engine', () => {
+  it('captures search highlighting with the website snapshot and restores it without leaking to links', async () => {
+    const { engine, current } = setup();
+    await engine.search('garden soil'); await engine.navigate('a.zz', 'search');
+    expect(current()).toMatchObject({ kind: 'website', searchQuery: 'garden soil' });
+    await engine.navigate('b.zz', 'link'); expect(current()).not.toHaveProperty('searchQuery');
+    engine.go(-1); expect(current()).toMatchObject({ kind: 'website', searchQuery: 'garden soil' });
+    engine.go(-1); expect(current()).toMatchObject({ kind: 'search', result: { query: 'garden soil' } });
+  });
   it('bounds retained snapshots while preserving recent entries and traversal', async () => {
     const { engine, current } = setup();
     await engine.navigate('first.zz'); const first = current().id;

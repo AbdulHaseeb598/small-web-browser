@@ -104,11 +104,13 @@ export class NavigationEngine {
     const requestId = this.requestId;
     this.abort = new AbortController();
     this.publish({ pending: true, error: null, recordingError: null });
+    const current = this.snapshot.session?.entries[this.snapshot.session.index];
+    const searchQuery = method === 'search' && current?.kind === 'search' ? current.result.query : undefined;
     try {
       const site = await this.api.site(address, this.abort.signal);
       if (requestId !== this.requestId || this.snapshot.personId !== personId) return;
       const base = { id: 'entry-' + ++this.nextId, scrollY: 0 };
-      const entry: NavigationEntry = site ? { ...base, kind: 'website', site: { ...site } } : { ...base, kind: 'missing', address };
+      const entry: NavigationEntry = site ? { ...base, kind: 'website', site: { ...site }, ...(searchQuery ? { searchQuery } : {}) } : { ...base, kind: 'missing', address };
       this.append(entry);
       await this.record(personId, entry, method);
     } catch {

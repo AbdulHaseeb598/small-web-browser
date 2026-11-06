@@ -9,7 +9,7 @@ export interface SearchResult { address: string; title: string; excerpt: string;
 export interface SearchResponse { query: string; items: SearchResult[]; total: number; limit: number }
 export type NavigationEntry = { id: string; scrollY: number } & (
   | { kind: 'home' }
-  | { kind: 'website'; site: Site }
+  | { kind: 'website'; site: Site; searchQuery?: string }
   | { kind: 'missing'; address: string }
   | { kind: 'search'; result: SearchResponse }
 );
