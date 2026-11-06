@@ -297,6 +297,7 @@ describe('Domain APIs with real MongoDB and compiled NestJS', () => {
     for (const invalid of [
       { ...valid, title: '   ' },
       { ...valid, html: '' },
+      { ...valid, html: ' \n\t ' },
       { ...valid, html: 12 },
       { ...valid, authorId: 'bad-id' },
       { ...valid, createdAt: new Date().toISOString() },

@@ -8,6 +8,7 @@ import { useBrowserHistory } from '../lib/use-browser-history';
 import { AddressForm, SearchForm } from './browser-forms';
 import { HistoryPanel } from './history-panel';
 import { SearchResults } from './search-results';
+import { PublishDialog } from './publish-dialog';
 
 const PageFrame = dynamic(() => import('./page-frame'), { ssr: false, loading: () => <p role="status" className="quiet-state">Preparing page…</p> });
 
@@ -21,6 +22,7 @@ export function BrowserApp({ api, onRetry }: { api: BrowserApi; onRetry: () => v
   const snapshot = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [data, setData] = useState<{ loading: boolean; failed: boolean; people: Person[]; sites: SiteMetadata[] }>({ loading: true, failed: false, people: [], sites: [] });
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   useBrowserHistory(engine);
   useEffect(() => {
     const abort = new AbortController();
@@ -40,8 +42,9 @@ export function BrowserApp({ api, onRetry }: { api: BrowserApi; onRetry: () => v
   const onHistory = useCallback((address: string) => { void engine.navigate(address, 'history'); }, [engine]);
   return <div className="browser-app">
     <header className="app-header"><a className="brand" href="#" onClick={(event) => event.preventDefault()} aria-label="Small Web Browser"><span className="brand-mark" aria-hidden="true">sw</span><span>Small Web Browser<small>A neighborhood of fictional websites</small></span></a>
-      <div className="person-control"><label htmlFor="person-selector">Browsing as</label><select id="person-selector" value={snapshot.personId ?? ''} disabled={data.loading || data.people.length === 0} onChange={(event) => engine.selectPerson(event.target.value)}><option value="" disabled>{data.loading ? 'Loading people…' : 'Choose a person'}</option>{data.people.map((person) => <option key={person._id} value={person._id}>{person.name}</option>)}</select></div>
+      <div className="header-actions"><button className="secondary-button" disabled={data.loading || data.people.length === 0} onClick={() => setPublishing(true)}>Publish</button><div className="person-control"><label htmlFor="person-selector">Browsing as</label><select id="person-selector" value={snapshot.personId ?? ''} disabled={data.loading || data.people.length === 0} onChange={(event) => engine.selectPerson(event.target.value)}><option value="" disabled>{data.loading ? 'Loading people…' : 'Choose a person'}</option>{data.people.map((person) => <option key={person._id} value={person._id}>{person.name}</option>)}</select></div></div>
     </header>
+    {data.people.length > 0 && <PublishDialog open={publishing} people={data.people} onClose={() => setPublishing(false)} onPublished={(site) => setData((previous) => ({ ...previous, sites: [site, ...previous.sites.filter((item) => item.address !== site.address)] }))} onOpenSite={(address) => { setPublishing(false); void engine.navigate(address, 'typed'); }} />}
     {data.loading ? <div className="app-empty" role="status">Loading the small web…</div> : data.failed ? <div className="app-empty" role="alert"><h1>The small web is unavailable.</h1><p>People and pages could not be loaded.</p><button className="primary-button" onClick={onRetry}>Try again</button></div> : data.people.length === 0 ? <div className="app-empty"><h1>No people are available yet.</h1><p>Choose a person once one has been added to start browsing.</p></div> : entry && session && snapshot.personId ? <>
       <section className="browser-window" aria-label="Simulated web browser">
         <div className="browser-toolbar"><div className="navigation-buttons"><button aria-label="Back" title="Back" disabled={session.index === 0} onClick={() => engine.go(-1)}>←<span>Back</span></button><button aria-label="Forward" title="Forward" disabled={session.index === session.entries.length - 1} onClick={() => engine.go(1)}>→<span>Forward</span></button></div>

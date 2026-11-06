@@ -1,6 +1,7 @@
 export interface Person { _id: string; name: string; createdAt: string }
 export interface SiteMetadata { _id: string; address: string; title: string; authorId: string; createdAt: string; updatedAt: string }
 export interface Site extends SiteMetadata { html: string }
+export interface Publication { address: string; title: string; html: string; authorId: string }
 export type NavigationMethod = 'typed' | 'link' | 'back' | 'forward' | 'history' | 'search';
 export interface Visit { _id: string; personId: string; address: string; visitedAt: string; method: NavigationMethod; exists: boolean }
 export interface HistoryPage { items: Visit[]; total: number; page: number; limit: number }
