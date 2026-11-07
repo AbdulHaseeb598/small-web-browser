@@ -6,6 +6,48 @@ deterministic demonstration data, and a responsive browser with per-person
 navigation, history, full-content search, website publishing, and hardened HTML
 containment, with unit, MongoDB integration, and Chrome regression coverage.
 
+## Quick Start — Windows PowerShell
+
+Install Git and Docker Desktop, then start Docker Desktop in Linux containers
+mode before running these commands in Windows PowerShell:
+
+```powershell
+git clone https://github.com/AbdulHaseeb598/small-web-browser.git
+cd small-web-browser
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+docker compose exec backend npm run seed
+```
+
+The first build can take a few minutes. Check `docker compose ps` and wait for
+all three services to become healthy. The seed command is safe to rerun: it
+inserts missing demonstration records without overwriting existing data and
+reports conflicting records explicitly.
+
+- Frontend: [http://localhost:3000](http://localhost:3000)
+- Backend health: [http://localhost:4000/api/health](http://localhost:4000/api/health)
+
+Useful commands (run individually as needed):
+
+```powershell
+docker compose logs --tail=100 backend
+docker compose stop
+docker compose start
+docker compose down
+```
+
+`docker compose down` preserves the named MongoDB database volume.
+`docker compose down -v` deletes that volume and its data; do not use it for
+normal shutdown.
+
+## Assessment Walkthrough
+
+Narrated walkthrough (4–5 minutes): Link will be added after recording.
+
+The application runs locally with Docker. Public deployment is not required
+for the assessment.
+
 ## Stack and structure
 
 Next.js with TypeScript, App Router, ESLint, and Tailwind CSS; NestJS with
@@ -335,20 +377,28 @@ suffixes are rejected. No DNS resolution or network browsing takes place.
 
 ### Example requests
 
+The following `curl` examples use Bash syntax, including `\` line continuation;
+run them in Bash (for example, Git Bash), rather than copying them unchanged
+into Windows PowerShell. Other `curl` snippets in this README are also Bash
+examples; the Quick Start above uses PowerShell.
+
 ```bash
 curl -X POST http://localhost:4000/api/people \
   -H 'Content-Type: application/json' -d '{"name":"Ada"}'
 curl http://localhost:4000/api/people
 ```
 
-Replace `PERSON_ID` below with the returned person's `_id`:
+Replace `PERSON_ID` below with the returned person's `_id`. Site addresses must
+be unique: `fresh-demo.zz` is not part of the seed dataset. If it has already
+been published in your database, choose another unused `.zz` address; duplicate
+addresses return HTTP 409.
 
 ```bash
 curl -X POST http://localhost:4000/api/sites \
   -H 'Content-Type: application/json' \
-  -d '{"address":"TidePool.ZZ","title":"Tidepool","html":"<h1>Hello</h1>","authorId":"PERSON_ID"}'
+  -d '{"address":"fresh-demo.zz","title":"Fresh demo","html":"<h1>Hello</h1>","authorId":"PERSON_ID"}'
 curl http://localhost:4000/api/sites
-curl http://localhost:4000/api/sites/tidepool.zz
+curl http://localhost:4000/api/sites/fresh-demo.zz
 curl -X POST http://localhost:4000/api/visits \
   -H 'Content-Type: application/json' \
   -d '{"personId":"PERSON_ID","address":"missing.zz","method":"link"}'
