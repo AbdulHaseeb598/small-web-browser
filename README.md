@@ -41,12 +41,6 @@ docker compose down
 `docker compose down -v` deletes that volume and its data; do not use it for
 normal shutdown.
 
-## Assessment Walkthrough
-
-Narrated walkthrough (4–5 minutes): Link will be added after recording.
-
-The application runs locally with Docker. Public deployment is not required
-for the assessment.
 
 ## Stack and structure
 
